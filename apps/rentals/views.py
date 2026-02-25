@@ -7,8 +7,9 @@ from rest_framework.response import Response
 
 from apps.core.permissions import IsAdminOrReadOnly, IsOwner
 
-from . import availability_service, rental_service
+from . import availability_service, rental_service, review_service
 from .models import Accessory, Console, Game, Rental, RentalStatus, Review
+from .review_service import ReviewValidationError
 from .serializers import (
     AccessorySerializer,
     AvailabilityCheckSerializer,
@@ -21,7 +22,12 @@ from .serializers import (
     RentalCreateSerializer,
     RentalDetailSerializer,
     RentalListSerializer,
-    ReviewSerializer,
+    ReviewableRentalSerializer,
+    ReviewCreateSerializer,
+    ReviewDetailSerializer,
+    ReviewListSerializer,
+    ReviewStatsSerializer,
+    ReviewUpdateSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,9 +56,27 @@ class ConsoleViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=["get"])
     def reviews(self, request, slug=None):
+        """GET /consoles/{slug}/reviews/ — paginated reviews for this console."""
         console = self.get_object()
-        reviews = Review.objects.filter(console=console).select_related("user")
-        serializer = ReviewSerializer(reviews, many=True)
+        reviews = (
+            Review.objects
+            .filter(console=console)
+            .select_related("user", "rental")
+            .order_by("-created_at")
+        )
+        page = self.paginate_queryset(reviews)
+        if page is not None:
+            serializer = ReviewListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = ReviewListSerializer(reviews, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="review-stats")
+    def review_stats(self, request, slug=None):
+        """GET /consoles/{slug}/review-stats/ — aggregate rating stats."""
+        console = self.get_object()
+        stats = review_service.get_console_review_stats(console)
+        serializer = ReviewStatsSerializer(stats)
         return Response(serializer.data)
 
     @action(detail=True, methods=["get"], url_path="check-availability")
@@ -222,18 +246,136 @@ class RentalViewSet(viewsets.ModelViewSet):
 # REVIEW
 # ═══════════════════════════════════════════════════════════════════
 
-class ReviewCreateView(generics.CreateAPIView):
-    """Create a review for a completed rental."""
+class ReviewViewSet(viewsets.GenericViewSet):
+    """
+    Full CRUD for reviews — business logic delegated to ``review_service``.
 
-    serializer_class = ReviewSerializer
+    Endpoints (registered at ``/reviews/``)
+    ──────────────────────────────────────
+    POST   /reviews/                 → create
+    GET    /reviews/                 → list (own reviews)
+    GET    /reviews/{id}/            → detail
+    PATCH  /reviews/{id}/            → partial update
+    DELETE /reviews/{id}/            → destroy
+    GET    /reviews/reviewable/      → rentals the user can still review
+    """
+
     permission_classes = [permissions.IsAuthenticated]
+    lookup_field = "id"
 
-    def perform_create(self, serializer):
-        rental = serializer.validated_data["rental"]
-        serializer.save(
-            user=self.request.user,
-            console=rental.console,
+    def get_queryset(self):
+        return (
+            Review.objects
+            .filter(user=self.request.user)
+            .select_related("rental", "console", "user")
+            .order_by("-created_at")
         )
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return ReviewCreateSerializer
+        if self.action in ("partial_update", "update"):
+            return ReviewUpdateSerializer
+        if self.action == "retrieve":
+            return ReviewDetailSerializer
+        return ReviewListSerializer
+
+    # ── CREATE ───────────────────────────────────────────────────
+
+    def create(self, request):
+        """POST /reviews/ — submit a review for a completed rental."""
+        serializer = ReviewCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            review = review_service.create_review(
+                user=request.user,
+                rental=serializer.validated_data["rental"],
+                rating=serializer.validated_data["rating"],
+                title=serializer.validated_data.get("title", ""),
+                comment=serializer.validated_data.get("comment", ""),
+            )
+        except ReviewValidationError as exc:
+            return Response(
+                {"detail": exc.detail},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            ReviewDetailSerializer(review).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ── LIST (own reviews) ───────────────────────────────────────
+
+    def list(self, request):
+        """GET /reviews/ — list the authenticated user's reviews."""
+        queryset = self.get_queryset()
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = ReviewListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = ReviewListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    # ── RETRIEVE ─────────────────────────────────────────────────
+
+    def retrieve(self, request, id=None):
+        """GET /reviews/{id}/ — single review detail."""
+        review = self.get_object()
+        return Response(ReviewDetailSerializer(review).data)
+
+    # ── PARTIAL UPDATE ───────────────────────────────────────────
+
+    def partial_update(self, request, id=None):
+        """PATCH /reviews/{id}/ — edit an existing review."""
+        review = self.get_object()
+        serializer = ReviewUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            review = review_service.update_review(
+                review=review,
+                user=request.user,
+                **serializer.validated_data,
+            )
+        except ReviewValidationError as exc:
+            return Response(
+                {"detail": exc.detail},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(ReviewDetailSerializer(review).data)
+
+    # ── DELETE ────────────────────────────────────────────────────
+
+    def destroy(self, request, id=None):
+        """DELETE /reviews/{id}/ — remove a review."""
+        review = self.get_object()
+        try:
+            review_service.delete_review(review=review, user=request.user)
+        except ReviewValidationError as exc:
+            return Response(
+                {"detail": exc.detail},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # ── REVIEWABLE RENTALS ───────────────────────────────────────
+
+    @action(detail=False, methods=["get"])
+    def reviewable(self, request):
+        """
+        GET /reviews/reviewable/
+        Returns rentals the user can still submit a review for.
+        """
+        rentals = review_service.get_reviewable_rentals(request.user)
+        page = self.paginate_queryset(rentals)
+        if page is not None:
+            serializer = ReviewableRentalSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = ReviewableRentalSerializer(rentals, many=True)
+        return Response(serializer.data)
 
 
 # ═══════════════════════════════════════════════════════════════════

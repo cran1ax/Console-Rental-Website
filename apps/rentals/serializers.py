@@ -355,32 +355,138 @@ class RentalDetailSerializer(serializers.ModelSerializer):
 # REVIEW
 # ═══════════════════════════════════════════════════════════════════
 
-class ReviewSerializer(serializers.ModelSerializer):
-    user_name = serializers.SerializerMethodField()
+class ReviewCreateSerializer(serializers.Serializer):
+    """
+    Input serializer for creating a review.
+
+    Validation is intentionally *thin* — heavy business-rule checks
+    (rental ownership, returned status, duplicate) live in
+    ``review_service.create_review()``.
+    """
+
+    rental_id = serializers.PrimaryKeyRelatedField(
+        queryset=Rental.objects.all(),
+        source="rental",
+        help_text="UUID of the completed rental to review.",
+    )
+    rating = serializers.IntegerField(
+        min_value=1,
+        max_value=5,
+        help_text="1 = terrible, 5 = excellent.",
+    )
+    title = serializers.CharField(
+        max_length=150,
+        required=False,
+        default="",
+        help_text="Optional headline for the review.",
+    )
+    comment = serializers.CharField(
+        required=False,
+        default="",
+        help_text="Detailed review text.",
+    )
+
+
+class ReviewUpdateSerializer(serializers.Serializer):
+    """Input serializer for editing an existing review."""
+
+    rating = serializers.IntegerField(
+        min_value=1, max_value=5, required=False,
+    )
+    title = serializers.CharField(
+        max_length=150, required=False, allow_blank=True,
+    )
+    comment = serializers.CharField(
+        required=False, allow_blank=True,
+    )
+
+
+class ReviewListSerializer(serializers.ModelSerializer):
+    """Compact output for review listings (e.g. console detail page)."""
+
+    user_name = serializers.CharField(source="user.get_full_name", read_only=True)
+    console_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Review
         fields = [
             "id",
             "rental",
+            "console",
+            "console_name",
+            "title",
             "rating",
             "comment",
+            "is_verified",
+            "helpful_count",
             "user_name",
             "created_at",
         ]
-        read_only_fields = ["id", "user_name", "created_at"]
 
-    def get_user_name(self, obj):
-        return obj.user.get_full_name()
+    def get_console_name(self, obj):
+        return obj.console.name if obj.console else None
 
-    def validate_rental(self, value):
-        from .models import RentalStatus
 
-        if value.status != RentalStatus.RETURNED:
-            raise serializers.ValidationError("You can only review returned rentals.")
-        if hasattr(value, "review"):
-            raise serializers.ValidationError("You have already reviewed this rental.")
-        return value
+class ReviewDetailSerializer(serializers.ModelSerializer):
+    """Full review detail with rental context."""
+
+    user_name = serializers.CharField(source="user.get_full_name", read_only=True)
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    rental_number = serializers.CharField(source="rental.rental_number", read_only=True)
+    console_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Review
+        fields = [
+            "id",
+            "rental",
+            "rental_number",
+            "console",
+            "console_name",
+            "user_name",
+            "user_email",
+            "title",
+            "rating",
+            "comment",
+            "is_verified",
+            "helpful_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_console_name(self, obj):
+        return obj.console.name if obj.console else None
+
+
+class ReviewStatsSerializer(serializers.Serializer):
+    """Output for aggregate console review stats."""
+
+    average_rating = serializers.FloatField(allow_null=True)
+    total_reviews = serializers.IntegerField()
+    rating_breakdown = serializers.DictField(
+        child=serializers.IntegerField(),
+    )
+
+
+class ReviewableRentalSerializer(serializers.ModelSerializer):
+    """Compact rental info for the 'reviewable rentals' endpoint."""
+
+    console_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Rental
+        fields = [
+            "id",
+            "rental_number",
+            "console",
+            "console_name",
+            "rental_start_date",
+            "rental_end_date",
+            "actual_return_date",
+        ]
+
+    def get_console_name(self, obj):
+        return obj.console.name if obj.console else None
 
 
 # ═══════════════════════════════════════════════════════════════════

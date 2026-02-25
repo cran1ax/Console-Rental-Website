@@ -177,8 +177,53 @@ class RentalAdmin(admin.ModelAdmin):
 
 @admin.register(Review)
 class ReviewAdmin(admin.ModelAdmin):
-    list_display = ("user", "console", "rating", "created_at")
-    list_filter = ("rating", "created_at")
-    search_fields = ("user__email", "console__name", "comment")
-    readonly_fields = ("created_at", "updated_at")
+    list_display = (
+        "short_id",
+        "user",
+        "console",
+        "rating_stars",
+        "title",
+        "is_verified",
+        "helpful_count",
+        "created_at",
+    )
+    list_filter = ("rating", "is_verified", "created_at")
+    search_fields = (
+        "user__email",
+        "console__name",
+        "title",
+        "comment",
+        "rental__rental_number",
+    )
+    readonly_fields = ("created_at", "updated_at", "is_verified")
     raw_id_fields = ("user", "rental", "console")
+
+    fieldsets = (
+        (None, {
+            "fields": ("rental", "user", "console"),
+        }),
+        ("Review", {
+            "fields": ("title", "rating", "comment"),
+        }),
+        ("Moderation", {
+            "fields": ("is_verified", "helpful_count"),
+        }),
+        ("Timestamps", {
+            "fields": ("created_at", "updated_at"),
+            "classes": ("collapse",),
+        }),
+    )
+
+    @admin.display(description="ID")
+    def short_id(self, obj):
+        return str(obj.id)[:8]
+
+    @admin.display(description="Rating")
+    def rating_stars(self, obj):
+        filled = "★" * obj.rating
+        empty = "☆" * (5 - obj.rating)
+        return format_html(
+            '<span style="color:#f5a623;font-size:14px;">{}{}</span>',
+            filled,
+            empty,
+        )

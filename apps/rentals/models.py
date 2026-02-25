@@ -448,10 +448,23 @@ class Rental(BaseModel):
 # ═══════════════════════════════════════════════════════════════════
 
 class Review(BaseModel):
-    """User review for a completed rental."""
+    """
+    User review for a **completed** rental.
+
+    Rules enforced at the model level (``clean``):
+    • The rental must have status RETURNED.
+    • The review author must be the rental owner.
+    • Only one review per rental (``OneToOneField`` + ``UniqueConstraint``).
+
+    ``console`` is nullable because game-only / accessory-only rentals
+    don't have a console attached.
+    """
 
     rental = models.OneToOneField(
-        Rental, on_delete=models.CASCADE, related_name="review",
+        Rental,
+        on_delete=models.CASCADE,
+        related_name="review",
+        help_text="Each rental may receive at most one review.",
     )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -459,22 +472,74 @@ class Review(BaseModel):
         related_name="reviews",
     )
     console = models.ForeignKey(
-        Console, on_delete=models.CASCADE, related_name="reviews",
+        Console,
+        on_delete=models.CASCADE,
+        related_name="reviews",
+        blank=True,
+        null=True,
+        help_text="Auto-populated from the rental's console (nullable for game-only rentals).",
     )
+
+    # ── Review content ───────────────────────────────────────────
+    title = models.CharField("review title", max_length=150, blank=True)
     rating = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(5)],
+        help_text="1 = terrible, 5 = excellent.",
     )
-    comment = models.TextField(blank=True)
+    comment = models.TextField("review comment", blank=True)
+
+    # ── Moderation / trust ───────────────────────────────────────
+    is_verified = models.BooleanField(
+        "verified purchase",
+        default=True,
+        help_text="Auto-set to True because only returned-rental owners can review.",
+    )
+    helpful_count = models.PositiveIntegerField(
+        "helpful votes",
+        default=0,
+        help_text="Number of users who found this review helpful.",
+    )
 
     class Meta(BaseModel.Meta):
         verbose_name = "review"
         verbose_name_plural = "reviews"
+        ordering = ["-created_at"]
         constraints = [
-            models.UniqueConstraint(fields=["user", "rental"], name="unique_user_rental_review"),
+            models.UniqueConstraint(
+                fields=["user", "rental"],
+                name="unique_user_rental_review",
+            ),
         ]
         indexes = [
             models.Index(fields=["console", "rating"], name="idx_review_console_rating"),
+            models.Index(fields=["user", "-created_at"], name="idx_review_user_recent"),
+            models.Index(fields=["is_verified", "rating"], name="idx_review_verified_rating"),
         ]
 
     def __str__(self):
-        return f"Review by {self.user.email} – {self.rating}/5"
+        target = self.console.name if self.console else f"Rental #{self.rental.rental_number}"
+        return f"{self.user.email} → {target} ({self.rating}★)"
+
+    def clean(self):
+        """Model-level validation — runs on admin save and full_clean()."""
+        errors = {}
+
+        # 1. Rental must be RETURNED
+        if self.rental_id and self.rental.status != RentalStatus.RETURNED:
+            errors["rental"] = (
+                "Reviews can only be submitted for returned rentals "
+                f"(current status: {self.rental.get_status_display()})."
+            )
+
+        # 2. Review author must own the rental
+        if self.rental_id and self.user_id and self.rental.user_id != self.user_id:
+            errors["user"] = "You can only review your own rentals."
+
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        # Auto-populate console from the rental if not set
+        if not self.console_id and self.rental_id and self.rental.console_id:
+            self.console_id = self.rental.console_id
+        super().save(*args, **kwargs)
