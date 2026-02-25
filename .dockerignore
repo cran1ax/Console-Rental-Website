@@ -1,0 +1,60 @@
+# ═══════════════════════════════════════════════════════════════════
+# Corner Console — Docker Ignore
+# ═══════════════════════════════════════════════════════════════════
+
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.prod
+.env.local
+
+# Frontend (built separately or served via CDN)
+frontend/node_modules
+frontend/.vite
+frontend/dist
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# Docs / CI
+README.md
+LICENSE
+.github
+*.md
+
+# Static & media (collected at build time)
+staticfiles/
+media/
+
+# Tests
+.pytest_cache
+.coverage
+htmlcov/

@@ -87,26 +87,136 @@ python manage.py runserver
 │   │   ├── prod.py          # Production overrides
 │   │   └── test.py          # Test overrides
 │   ├── urls.py              # Root URL config
-│   ├── celery.py            # Celery app
+│   ├── celery.py            # Celery app + beat schedule
 │   ├── wsgi.py
 │   └── asgi.py
 ├── apps/
 │   ├── core/                # Shared base models, utils, permissions
 │   ├── users/               # Custom user model, auth, profiles
-│   ├── rentals/             # Consoles, rentals, reviews
-│   └── payments/            # Stripe payments, webhooks
+│   ├── rentals/             # Consoles, rentals, reviews, Celery tasks
+│   └── payments/            # Stripe payments, webhooks, Celery tasks
+├── docker/
+│   └── entrypoint.sh        # Production entrypoint (migrate + collectstatic)
+├── nginx/
+│   └── nginx.conf           # Nginx reverse proxy config
 ├── templates/
+│   └── emails/              # HTML email templates
 ├── static/
 ├── media/
 ├── requirements/
 │   ├── base.txt
 │   ├── dev.txt
 │   └── prod.txt
-├── docker-compose.yml
-├── Dockerfile
-├── Makefile
+├── frontend/                # React 18 + Vite SPA
+├── docker-compose.yml       # Development services
+├── docker-compose.prod.yml  # Production stack (Nginx + Gunicorn + Celery)
+├── Dockerfile               # Multi-stage production build
+├── gunicorn.conf.py         # Gunicorn configuration
+├── Makefile                 # Dev & prod shortcuts
 └── manage.py
 ```
+
+## Celery Tasks
+
+| Task | Schedule | Description |
+|------|----------|-------------|
+| `send_rental_end_reminders` | Daily @ 9:00 AM | Email users whose rental ends tomorrow |
+| `auto_mark_late_rentals` | Daily @ 00:05 | Mark overdue ACTIVE rentals as LATE |
+| `auto_refund_deposits` | Daily @ 10:00 AM | Refund deposits for on-time returns |
+| `expire_stale_checkout_sessions` | Every 30 min | Expire abandoned payment sessions |
+
+## Production Deployment
+
+### Prerequisites
+
+- Docker & Docker Compose v2
+- Domain name with DNS configured
+- (Optional) SSL certificate or use Let's Encrypt
+
+### 1. Clone & Configure
+
+```bash
+git clone https://github.com/cran1ax/Console-Rental-Website.git
+cd Console-Rental-Website
+
+# Create production environment file
+cp .env.prod.example .env.prod
+# Edit .env.prod with your production values (database, Stripe live keys, SMTP, etc.)
+```
+
+### 2. Build & Start
+
+```bash
+# Build all images
+make prod-build
+
+# Start all services (Nginx, Gunicorn, PostgreSQL, Redis, Celery, Flower)
+make prod-up
+
+# Create superuser
+make prod-createsuperuser
+```
+
+### 3. Verify
+
+```bash
+# Check service status
+make prod-status
+
+# Tail logs
+make prod-logs
+
+# Health check
+curl http://yourdomain.com/health/
+```
+
+### 4. SSL Setup (Optional)
+
+1. Place your SSL certificates in `nginx/ssl/`:
+   - `fullchain.pem`
+   - `privkey.pem`
+2. Uncomment the SSL lines in `nginx/nginx.conf`
+3. Restart: `make prod-restart`
+
+### Architecture
+
+```
+                ┌─────────────┐
+    Internet ──▶│    Nginx    │
+                │  (port 80)  │
+                └──────┬──────┘
+                       │
+          ┌────────────┼────────────┐
+          │            │            │
+    /static/     /media/      proxy_pass
+    /media/                        │
+                            ┌──────▼──────┐
+                            │  Gunicorn   │
+                            │  (port 8000)│
+                            └──────┬──────┘
+                                   │
+                ┌──────────────────┼──────────────────┐
+                │                  │                   │
+         ┌──────▼──────┐   ┌──────▼──────┐   ┌───────▼───────┐
+         │ PostgreSQL  │   │    Redis    │   │ Celery Worker │
+         │   (5432)    │   │   (6379)    │   │ + Beat        │
+         └─────────────┘   └─────────────┘   └───────────────┘
+```
+
+### Production Makefile Commands
+
+| Command | Description |
+|---------|-------------|
+| `make prod-build` | Build Docker images |
+| `make prod-up` | Start all services |
+| `make prod-down` | Stop all services |
+| `make prod-logs` | Tail all logs |
+| `make prod-logs-web` | Tail web + nginx logs |
+| `make prod-restart` | Restart web + workers |
+| `make prod-shell` | Django shell in container |
+| `make prod-migrate` | Run migrations |
+| `make prod-status` | Show service status |
+| `make prod-backup-db` | Backup PostgreSQL |
 
 ## License
 

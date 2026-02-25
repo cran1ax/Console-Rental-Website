@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -8,7 +9,15 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+
+def health_check(request):
+    """Lightweight health endpoint for Docker / load-balancer probes."""
+    return JsonResponse({"status": "ok"}, status=200)
+
+
 urlpatterns = [
+    # Health check (no auth, no middleware overhead)
+    path("health/", health_check, name="health-check"),
     # Admin
     path("admin/", admin.site.urls),
     # API v1
