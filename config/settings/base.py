@@ -253,7 +253,23 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes (graceful)
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000  # Recycle after 1000 tasks (prevent leaks)
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+# Task routing — all tasks go to the default queue for now.
+# Split into dedicated queues as the workload grows.
+CELERY_TASK_ROUTES = {
+    "apps.rentals.tasks.*": {"queue": "default"},
+    "apps.payments.tasks.*": {"queue": "default"},
+}
+
+# Task rate limits
+CELERY_TASK_ANNOTATIONS = {
+    "apps.rentals.tasks.send_single_rental_reminder": {"rate_limit": "10/m"},
+    "apps.payments.tasks.send_payment_confirmation": {"rate_limit": "20/m"},
+}
 
 # ========================
 # STRIPE
