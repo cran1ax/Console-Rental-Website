@@ -1,8 +1,12 @@
 from django.db import models
 from rest_framework import serializers
 
-from .models import Console, ConsoleImage, Rental, Review
+from .models import Accessory, Console, ConsoleImage, Game, Rental, Review
 
+
+# ═══════════════════════════════════════════════════════════════════
+# CONSOLE
+# ═══════════════════════════════════════════════════════════════════
 
 class ConsoleImageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -11,9 +15,9 @@ class ConsoleImageSerializer(serializers.ModelSerializer):
 
 
 class ConsoleListSerializer(serializers.ModelSerializer):
-    console_type_display = serializers.CharField(
-        source="get_console_type_display", read_only=True
-    )
+    console_type_display = serializers.CharField(source="get_console_type_display", read_only=True)
+    condition_display = serializers.CharField(source="get_condition_status_display", read_only=True)
+    is_in_stock = serializers.BooleanField(read_only=True)
     primary_image = serializers.SerializerMethodField()
 
     class Meta:
@@ -24,14 +28,15 @@ class ConsoleListSerializer(serializers.ModelSerializer):
             "slug",
             "console_type",
             "console_type_display",
-            "condition",
-            "daily_rate",
-            "weekly_rate",
-            "monthly_rate",
+            "condition_status",
+            "condition_display",
+            "daily_price",
+            "weekly_price",
+            "monthly_price",
             "security_deposit",
-            "is_available",
-            "includes_controller",
-            "includes_games",
+            "stock_quantity",
+            "available_quantity",
+            "is_in_stock",
             "primary_image",
         ]
 
@@ -45,10 +50,10 @@ class ConsoleListSerializer(serializers.ModelSerializer):
 
 
 class ConsoleDetailSerializer(serializers.ModelSerializer):
-    console_type_display = serializers.CharField(
-        source="get_console_type_display", read_only=True
-    )
+    console_type_display = serializers.CharField(source="get_console_type_display", read_only=True)
+    condition_display = serializers.CharField(source="get_condition_status_display", read_only=True)
     images = ConsoleImageSerializer(many=True, read_only=True)
+    is_in_stock = serializers.BooleanField(read_only=True)
     average_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
 
@@ -61,14 +66,15 @@ class ConsoleDetailSerializer(serializers.ModelSerializer):
             "console_type",
             "console_type_display",
             "description",
-            "condition",
-            "daily_rate",
-            "weekly_rate",
-            "monthly_rate",
+            "condition_status",
+            "condition_display",
+            "daily_price",
+            "weekly_price",
+            "monthly_price",
             "security_deposit",
-            "is_available",
-            "includes_controller",
-            "includes_games",
+            "stock_quantity",
+            "available_quantity",
+            "is_in_stock",
             "image",
             "images",
             "average_rating",
@@ -86,11 +92,114 @@ class ConsoleDetailSerializer(serializers.ModelSerializer):
         return obj.reviews.count()
 
 
+# ═══════════════════════════════════════════════════════════════════
+# GAME
+# ═══════════════════════════════════════════════════════════════════
+
+class GameListSerializer(serializers.ModelSerializer):
+    platform_display = serializers.CharField(source="get_platform_display", read_only=True)
+    genre_display = serializers.CharField(source="get_genre_display", read_only=True)
+    is_in_stock = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Game
+        fields = [
+            "id",
+            "title",
+            "slug",
+            "platform",
+            "platform_display",
+            "genre",
+            "genre_display",
+            "rating",
+            "daily_price",
+            "weekly_price",
+            "stock_quantity",
+            "available_quantity",
+            "is_in_stock",
+            "cover_image",
+        ]
+
+
+class GameDetailSerializer(serializers.ModelSerializer):
+    platform_display = serializers.CharField(source="get_platform_display", read_only=True)
+    genre_display = serializers.CharField(source="get_genre_display", read_only=True)
+    is_in_stock = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Game
+        fields = [
+            "id",
+            "title",
+            "slug",
+            "platform",
+            "platform_display",
+            "genre",
+            "genre_display",
+            "description",
+            "rating",
+            "daily_price",
+            "weekly_price",
+            "stock_quantity",
+            "available_quantity",
+            "is_in_stock",
+            "cover_image",
+            "created_at",
+        ]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ACCESSORY
+# ═══════════════════════════════════════════════════════════════════
+
+class AccessorySerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(source="get_category_display", read_only=True)
+    compatible_with_display = serializers.CharField(source="get_compatible_with_display", read_only=True)
+    is_in_stock = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Accessory
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "category",
+            "category_display",
+            "compatible_with",
+            "compatible_with_display",
+            "description",
+            "price_per_day",
+            "stock_quantity",
+            "available_quantity",
+            "is_in_stock",
+            "image",
+        ]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# RENTAL
+# ═══════════════════════════════════════════════════════════════════
+
 class RentalCreateSerializer(serializers.ModelSerializer):
+    game_ids = serializers.PrimaryKeyRelatedField(
+        queryset=Game.objects.filter(is_active=True),
+        many=True,
+        required=False,
+        source="games",
+    )
+    accessory_ids = serializers.PrimaryKeyRelatedField(
+        queryset=Accessory.objects.filter(is_active=True),
+        many=True,
+        required=False,
+        source="accessories",
+    )
+
     class Meta:
         model = Rental
         fields = [
             "console",
+            "game_ids",
+            "accessory_ids",
             "start_date",
             "end_date",
             "delivery_address",
@@ -99,22 +208,25 @@ class RentalCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         if data["start_date"] >= data["end_date"]:
-            raise serializers.ValidationError(
-                "End date must be after start date."
-            )
-        if not data["console"].is_available:
-            raise serializers.ValidationError(
-                "This console is not currently available for rent."
-            )
+            raise serializers.ValidationError("End date must be after start date.")
+        if data["console"].available_quantity < 1:
+            raise serializers.ValidationError("This console is not currently available for rent.")
+
+        for game in data.get("games", []):
+            if game.available_quantity < 1:
+                raise serializers.ValidationError(f'Game "{game.title}" is out of stock.')
+
+        for acc in data.get("accessories", []):
+            if acc.available_quantity < 1:
+                raise serializers.ValidationError(f'Accessory "{acc.name}" is out of stock.')
+
         return data
 
 
 class RentalListSerializer(serializers.ModelSerializer):
     console_name = serializers.CharField(source="console.name", read_only=True)
     duration_days = serializers.IntegerField(read_only=True)
-    status_display = serializers.CharField(
-        source="get_status_display", read_only=True
-    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = Rental
@@ -136,10 +248,10 @@ class RentalListSerializer(serializers.ModelSerializer):
 
 class RentalDetailSerializer(serializers.ModelSerializer):
     console = ConsoleListSerializer(read_only=True)
+    games = GameListSerializer(many=True, read_only=True)
+    accessories = AccessorySerializer(many=True, read_only=True)
     duration_days = serializers.IntegerField(read_only=True)
-    status_display = serializers.CharField(
-        source="get_status_display", read_only=True
-    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
     is_overdue = serializers.BooleanField(read_only=True)
 
     class Meta:
@@ -148,6 +260,8 @@ class RentalDetailSerializer(serializers.ModelSerializer):
             "id",
             "rental_number",
             "console",
+            "games",
+            "accessories",
             "status",
             "status_display",
             "start_date",
@@ -165,6 +279,10 @@ class RentalDetailSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+
+# ═══════════════════════════════════════════════════════════════════
+# REVIEW
+# ═══════════════════════════════════════════════════════════════════
 
 class ReviewSerializer(serializers.ModelSerializer):
     user_name = serializers.SerializerMethodField()
@@ -188,11 +306,7 @@ class ReviewSerializer(serializers.ModelSerializer):
         from .models import RentalStatus
 
         if value.status != RentalStatus.RETURNED:
-            raise serializers.ValidationError(
-                "You can only review returned rentals."
-            )
+            raise serializers.ValidationError("You can only review returned rentals.")
         if hasattr(value, "review"):
-            raise serializers.ValidationError(
-                "You have already reviewed this rental."
-            )
+            raise serializers.ValidationError("You have already reviewed this rental.")
         return value

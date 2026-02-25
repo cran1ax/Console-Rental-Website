@@ -7,6 +7,8 @@ app_name = "rentals"
 
 router = DefaultRouter()
 router.register(r"consoles", views.ConsoleViewSet, basename="console")
+router.register(r"games", views.GameViewSet, basename="game")
+router.register(r"accessories", views.AccessoryViewSet, basename="accessory")
 router.register(r"bookings", views.RentalViewSet, basename="rental")
 
 urlpatterns = [
