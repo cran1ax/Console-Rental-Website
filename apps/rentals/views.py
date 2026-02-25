@@ -1,13 +1,36 @@
+"""
+Rentals API Views
+=================
+
+Thin HTTP controllers — all business logic lives in the service modules
+(``rental_service``, ``review_service``, ``availability_service``).
+
+Architecture
+────────────
+• **Catalog** (Console / Game / Accessory) — public, read-only, filterable
+• **Rentals** — authenticated, owner-only, create + read + actions
+• **Reviews** — authenticated CRUD + public console-review listing
+• **Availability** — public, date-range overlap checking
+"""
+
 import logging
 
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import filters, generics, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.core.permissions import IsAdminOrReadOnly, IsOwner
+from apps.core.permissions import IsAdminOrReadOnly, IsOwner, IsOwnerOrReadOnly
 
 from . import availability_service, rental_service, review_service
+from .filters import (
+    AccessoryFilter,
+    ConsoleFilter,
+    GameFilter,
+    RentalFilter,
+    ReviewFilter,
+)
 from .models import Accessory, Console, Game, Rental, RentalStatus, Review
 from .review_service import ReviewValidationError
 from .serializers import (
@@ -37,14 +60,41 @@ logger = logging.getLogger(__name__)
 # CONSOLE
 # ═══════════════════════════════════════════════════════════════════
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="List consoles",
+        description="Paginated, filterable catalog of active consoles.",
+        tags=["Consoles"],
+    ),
+    retrieve=extend_schema(
+        summary="Console detail",
+        description="Full detail for a single console including average rating.",
+        tags=["Consoles"],
+    ),
+)
 class ConsoleViewSet(viewsets.ReadOnlyModelViewSet):
-    """List and retrieve available consoles."""
+    """
+    Public, read-only console catalog.
+
+    GET  /consoles/                         → list (filterable, searchable)
+    GET  /consoles/{slug}/                  → detail
+    GET  /consoles/{slug}/reviews/          → paginated reviews
+    GET  /consoles/{slug}/review-stats/     → aggregate rating stats
+    GET  /consoles/{slug}/check-availability/ → date-range check
+
+    Filters
+    -------
+    ?console_type=ps5  &condition_status=excellent
+    ?daily_price_min=500  &daily_price_max=1500
+    ?in_stock=true
+    ?search=playstation  &ordering=daily_price
+    """
 
     queryset = Console.objects.filter(is_active=True).prefetch_related("images")
+    filterset_class = ConsoleFilter
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["console_type", "condition_status"]
     search_fields = ["name", "description"]
-    ordering_fields = ["daily_price", "created_at", "name"]
+    ordering_fields = ["daily_price", "weekly_price", "monthly_price", "created_at", "name"]
     ordering = ["-created_at"]
     permission_classes = [permissions.AllowAny]
     lookup_field = "slug"
@@ -108,14 +158,39 @@ class ConsoleViewSet(viewsets.ReadOnlyModelViewSet):
 # GAME
 # ═══════════════════════════════════════════════════════════════════
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="List games",
+        description="Paginated, filterable catalog of active games.",
+        tags=["Games"],
+    ),
+    retrieve=extend_schema(
+        summary="Game detail",
+        description="Full detail for a single game.",
+        tags=["Games"],
+    ),
+)
 class GameViewSet(viewsets.ReadOnlyModelViewSet):
-    """List and retrieve available games."""
+    """
+    Public, read-only game catalog.
+
+    GET  /games/           → list (filterable by genre & platform)
+    GET  /games/{slug}/    → detail
+
+    Filters
+    -------
+    ?platform=ps5  &genre=rpg
+    ?daily_price_min=50  &daily_price_max=200
+    ?rating_min=7  &rating_max=10
+    ?in_stock=true
+    ?search=god+of+war  &ordering=-rating
+    """
 
     queryset = Game.objects.filter(is_active=True)
+    filterset_class = GameFilter
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["platform", "genre"]
     search_fields = ["title", "description"]
-    ordering_fields = ["daily_price", "rating", "created_at", "title"]
+    ordering_fields = ["daily_price", "weekly_price", "rating", "created_at", "title"]
     ordering = ["-created_at"]
     permission_classes = [permissions.AllowAny]
     lookup_field = "slug"
@@ -130,13 +205,37 @@ class GameViewSet(viewsets.ReadOnlyModelViewSet):
 # ACCESSORY
 # ═══════════════════════════════════════════════════════════════════
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="List accessories",
+        description="Paginated, filterable catalog of active accessories.",
+        tags=["Accessories"],
+    ),
+    retrieve=extend_schema(
+        summary="Accessory detail",
+        description="Full detail for a single accessory.",
+        tags=["Accessories"],
+    ),
+)
 class AccessoryViewSet(viewsets.ReadOnlyModelViewSet):
-    """List and retrieve available accessories."""
+    """
+    Public, read-only accessory catalog.
+
+    GET  /accessories/           → list
+    GET  /accessories/{slug}/    → detail
+
+    Filters
+    -------
+    ?category=controller  &compatible_with=ps5
+    ?price_min=100  &price_max=500
+    ?in_stock=true
+    ?search=dualsense  &ordering=price_per_day
+    """
 
     queryset = Accessory.objects.filter(is_active=True)
     serializer_class = AccessorySerializer
+    filterset_class = AccessoryFilter
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["category", "compatible_with"]
     search_fields = ["name", "description"]
     ordering_fields = ["price_per_day", "created_at", "name"]
     ordering = ["-created_at"]
@@ -148,18 +247,51 @@ class AccessoryViewSet(viewsets.ReadOnlyModelViewSet):
 # RENTAL
 # ═══════════════════════════════════════════════════════════════════
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="List my rentals",
+        description="Paginated list of the authenticated user's rentals.",
+        tags=["Rentals"],
+    ),
+    retrieve=extend_schema(
+        summary="Rental detail",
+        description="Full detail for a single rental booking.",
+        tags=["Rentals"],
+    ),
+    create=extend_schema(
+        summary="Create rental",
+        description="Book a console / games / accessories for a date range.",
+        tags=["Rentals"],
+    ),
+)
 class RentalViewSet(viewsets.ModelViewSet):
     """
-    CRUD for user rentals.
+    Authenticated user's rental bookings.
 
-    All business logic (pricing, stock, late fees) is delegated to
-    ``rental_service``.  This view is intentionally thin.
+    Allowed methods: create, list, retrieve + custom actions.
+    PUT / PATCH / DELETE are **disabled** — state transitions go
+    through the service-layer actions (return, cancel).
+
+    POST   /bookings/                       → create a rental
+    GET    /bookings/                       → list own rentals
+    GET    /bookings/{pk}/                  → detail
+    POST   /bookings/{pk}/return_rental/    → mark returned
+    POST   /bookings/{pk}/cancel/           → cancel booking
+    GET    /bookings/{pk}/late_fee/         → preview late fee
+
+    Filters
+    -------
+    ?status=active  &rental_type=weekly  &payment_status=paid
+    ?start_after=2026-03-01  &start_before=2026-03-31
+    ?ordering=-rental_start_date
     """
 
+    http_method_names = ["get", "post", "head", "options"]
     permission_classes = [permissions.IsAuthenticated, IsOwner]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["status", "rental_type", "payment_status"]
-    ordering_fields = ["created_at", "rental_start_date"]
+    filterset_class = RentalFilter
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
+    search_fields = ["rental_number", "console__name"]
+    ordering_fields = ["created_at", "rental_start_date", "rental_end_date", "total_price"]
     ordering = ["-created_at"]
 
     def get_queryset(self):
@@ -167,13 +299,12 @@ class RentalViewSet(viewsets.ModelViewSet):
             Rental.objects.filter(user=self.request.user)
             .select_related("console")
             .prefetch_related("games", "accessories")
-            .order_by("-created_at")
         )
 
     def get_serializer_class(self):
         if self.action == "create":
             return RentalCreateSerializer
-        if self.action in ("retrieve",):
+        if self.action == "retrieve":
             return RentalDetailSerializer
         return RentalListSerializer
 
@@ -246,6 +377,33 @@ class RentalViewSet(viewsets.ModelViewSet):
 # REVIEW
 # ═══════════════════════════════════════════════════════════════════
 
+@extend_schema_view(
+    create=extend_schema(
+        summary="Submit a review",
+        description="Submit a review for a completed (returned) rental.",
+        tags=["Reviews"],
+    ),
+    list=extend_schema(
+        summary="List my reviews",
+        description="Paginated list of the authenticated user's reviews.",
+        tags=["Reviews"],
+    ),
+    retrieve=extend_schema(
+        summary="Review detail",
+        description="Full detail of a single review.",
+        tags=["Reviews"],
+    ),
+    partial_update=extend_schema(
+        summary="Update review",
+        description="Edit an existing review (rating, title, comment).",
+        tags=["Reviews"],
+    ),
+    destroy=extend_schema(
+        summary="Delete review",
+        description="Permanently remove a review.",
+        tags=["Reviews"],
+    ),
+)
 class ReviewViewSet(viewsets.GenericViewSet):
     """
     Full CRUD for reviews — business logic delegated to ``review_service``.
@@ -262,6 +420,11 @@ class ReviewViewSet(viewsets.GenericViewSet):
 
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = "id"
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_class = ReviewFilter
+    search_fields = ["title", "comment"]
+    ordering_fields = ["created_at", "rating", "helpful_count"]
+    ordering = ["-created_at"]
 
     def get_queryset(self):
         return (
@@ -382,6 +545,15 @@ class ReviewViewSet(viewsets.GenericViewSet):
 # AVAILABILITY
 # ═══════════════════════════════════════════════════════════════════
 
+@extend_schema(
+    summary="Bulk availability check",
+    description=(
+        "Check whether a console, games, and/or accessories are available "
+        "for a given date range. Returns per-item verdicts and a top-level "
+        "``all_available`` flag."
+    ),
+    tags=["Availability"],
+)
 class AvailabilityCheckView(generics.GenericAPIView):
     """
     POST /api/rentals/availability/check/
