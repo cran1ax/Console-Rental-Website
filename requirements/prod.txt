@@ -1,0 +1,14 @@
+-r base.txt
+
+# Production Server
+gunicorn==23.0.0
+uvicorn[standard]==0.34.0
+
+# Monitoring
+sentry-sdk[django]==2.19.2
+
+# Caching
+django-redis==5.4.0
+
+# Static Files
+whitenoise==6.8.2
