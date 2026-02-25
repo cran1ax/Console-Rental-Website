@@ -1,7 +1,5 @@
-import uuid
-from decimal import Decimal
+import logging
 
-from django.db import models, transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, generics, permissions, status, viewsets
 from rest_framework.decorators import action
@@ -9,6 +7,7 @@ from rest_framework.response import Response
 
 from apps.core.permissions import IsAdminOrReadOnly, IsOwner
 
+from . import rental_service
 from .models import Accessory, Console, Game, Rental, RentalStatus, Review
 from .serializers import (
     AccessorySerializer,
@@ -21,6 +20,8 @@ from .serializers import (
     RentalListSerializer,
     ReviewSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -97,12 +98,17 @@ class AccessoryViewSet(viewsets.ReadOnlyModelViewSet):
 # ═══════════════════════════════════════════════════════════════════
 
 class RentalViewSet(viewsets.ModelViewSet):
-    """CRUD operations for user rentals."""
+    """
+    CRUD for user rentals.
+
+    All business logic (pricing, stock, late fees) is delegated to
+    ``rental_service``.  This view is intentionally thin.
+    """
 
     permission_classes = [permissions.IsAuthenticated, IsOwner]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["status"]
-    ordering_fields = ["created_at", "start_date"]
+    filterset_fields = ["status", "rental_type", "payment_status"]
+    ordering_fields = ["created_at", "rental_start_date"]
     ordering = ["-created_at"]
 
     def get_queryset(self):
@@ -120,74 +126,69 @@ class RentalViewSet(viewsets.ModelViewSet):
             return RentalDetailSerializer
         return RentalListSerializer
 
-    @transaction.atomic
-    def perform_create(self, serializer):
-        console = serializer.validated_data["console"]
-        start_date = serializer.validated_data["start_date"]
-        end_date = serializer.validated_data["end_date"]
-        games = serializer.validated_data.get("games", [])
-        accessories = serializer.validated_data.get("accessories", [])
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-        duration = (end_date - start_date).days
-        total_amount = console.daily_price * Decimal(duration)
+        data = serializer.validated_data
 
-        # Add game costs
-        for game in games:
-            total_amount += game.daily_price * Decimal(duration)
-
-        # Add accessory costs
-        for acc in accessories:
-            total_amount += acc.price_per_day * Decimal(duration)
-
-        rental_number = f"CC-{uuid.uuid4().hex[:8].upper()}"
-
-        rental = serializer.save(
-            user=self.request.user,
-            daily_rate=console.daily_price,
-            total_amount=total_amount,
-            security_deposit=console.security_deposit,
-            rental_number=rental_number,
-        )
-
-        # Decrement inventory
-        Console.objects.filter(pk=console.pk).update(
-            available_quantity=models.F("available_quantity") - 1
-        )
-        for game in games:
-            Game.objects.filter(pk=game.pk).update(
-                available_quantity=models.F("available_quantity") - 1
+        try:
+            rental = rental_service.create_rental(
+                user=request.user,
+                console=data.get("console"),
+                games=data.get("game_ids", []),
+                accessories=data.get("accessory_ids", []),
+                rental_type=data["rental_type"],
+                rental_start_date=data["rental_start_date"],
+                rental_end_date=data["rental_end_date"],
+                delivery_option=data.get("delivery_option", "pickup"),
+                delivery_address=data.get("delivery_address", ""),
+                delivery_notes=data.get("delivery_notes", ""),
             )
-        for acc in accessories:
-            Accessory.objects.filter(pk=acc.pk).update(
-                available_quantity=models.F("available_quantity") - 1
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST,
             )
 
+        return Response(
+            RentalDetailSerializer(rental).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ── Return a rental ──────────────────────────────────────────
     @action(detail=True, methods=["post"])
-    @transaction.atomic
+    def return_rental(self, request, pk=None):
+        rental = self.get_object()
+        try:
+            rental = rental_service.return_rental(rental)
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(RentalDetailSerializer(rental).data)
+
+    # ── Cancel a rental ──────────────────────────────────────────
+    @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):
         rental = self.get_object()
-        if rental.status not in (RentalStatus.PENDING, RentalStatus.CONFIRMED):
+        try:
+            rental = rental_service.cancel_rental(rental)
+        except ValueError as exc:
             return Response(
-                {"detail": "Cannot cancel this rental."},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST,
             )
-        rental.status = RentalStatus.CANCELLED
-        rental.save(update_fields=["status"])
-
-        # Restore inventory
-        Console.objects.filter(pk=rental.console_id).update(
-            available_quantity=models.F("available_quantity") + 1
-        )
-        for game in rental.games.all():
-            Game.objects.filter(pk=game.pk).update(
-                available_quantity=models.F("available_quantity") + 1
-            )
-        for acc in rental.accessories.all():
-            Accessory.objects.filter(pk=acc.pk).update(
-                available_quantity=models.F("available_quantity") + 1
-            )
-
         return Response({"detail": "Rental cancelled successfully."})
+
+    # ── Late fee preview ─────────────────────────────────────────
+    @action(detail=True, methods=["get"])
+    def late_fee(self, request, pk=None):
+        rental = self.get_object()
+        fee = rental_service.calculate_late_fee(rental)
+        return Response({
+            "rental_number": rental.rental_number,
+            "overdue_days": rental.overdue_days,
+            "late_fee": str(fee),
+        })
 
 
 # ═══════════════════════════════════════════════════════════════════

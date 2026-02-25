@@ -135,17 +135,40 @@ class RentalAdmin(admin.ModelAdmin):
         "rental_number",
         "user",
         "console",
+        "rental_type",
         "status",
-        "start_date",
-        "end_date",
-        "total_amount",
+        "payment_status",
+        "delivery_option",
+        "rental_start_date",
+        "rental_end_date",
+        "total_price",
+        "late_fee",
         "created_at",
     )
-    list_filter = ("status", "start_date", "end_date", "created_at")
+    list_filter = (
+        "status",
+        "rental_type",
+        "payment_status",
+        "delivery_option",
+        "rental_start_date",
+        "rental_end_date",
+        "created_at",
+    )
+    list_editable = ("status", "payment_status")
     search_fields = ("rental_number", "user__email", "console__name")
-    readonly_fields = ("created_at", "updated_at", "rental_number")
+    readonly_fields = ("created_at", "updated_at", "rental_number", "late_fee")
     raw_id_fields = ("user", "console")
     filter_horizontal = ("games", "accessories")
+
+    fieldsets = (
+        (None, {"fields": ("rental_number", "user", "console")}),
+        ("Items", {"fields": ("games", "accessories")}),
+        ("Configuration", {"fields": ("rental_type", "status", "payment_status")}),
+        ("Dates", {"fields": ("rental_start_date", "rental_end_date", "actual_return_date")}),
+        ("Pricing", {"fields": ("daily_rate", "total_price", "deposit_amount", "discount_amount", "late_fee")}),
+        ("Delivery", {"fields": ("delivery_option", "delivery_address", "delivery_notes")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════

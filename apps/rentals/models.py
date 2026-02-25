@@ -56,6 +56,7 @@ class AccessoryCategory(models.TextChoices):
     CHARGING_DOCK = "charging_dock", "Charging Dock"
     CAMERA = "camera", "Camera"
     STEERING_WHEEL = "steering_wheel", "Steering Wheel"
+    CABLE = "cable", "Cable"
     OTHER = "other", "Other"
 
 
@@ -64,8 +65,27 @@ class RentalStatus(models.TextChoices):
     CONFIRMED = "confirmed", "Confirmed"
     ACTIVE = "active", "Active"
     RETURNED = "returned", "Returned"
+    LATE = "late", "Late"
     CANCELLED = "cancelled", "Cancelled"
     OVERDUE = "overdue", "Overdue"
+
+
+class RentalType(models.TextChoices):
+    DAILY = "daily", "Daily"
+    WEEKLY = "weekly", "Weekly"
+    MONTHLY = "monthly", "Monthly"
+
+
+class DeliveryOption(models.TextChoices):
+    PICKUP = "pickup", "Self Pickup"
+    HOME_DELIVERY = "home_delivery", "Home Delivery"
+
+
+class PaymentStatus(models.TextChoices):
+    UNPAID = "unpaid", "Unpaid"
+    PARTIALLY_PAID = "partially_paid", "Partially Paid"
+    PAID = "paid", "Paid"
+    REFUNDED = "refunded", "Refunded"
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -305,7 +325,23 @@ class Rental(BaseModel):
         related_name="rentals",
     )
     console = models.ForeignKey(
-        Console, on_delete=models.PROTECT, related_name="rentals",
+        Console,
+        on_delete=models.PROTECT,
+        related_name="rentals",
+        blank=True,
+        null=True,
+    )
+
+    # ── Optional add-ons ─────────────────────────────────────────
+    games = models.ManyToManyField(Game, blank=True, related_name="rentals")
+    accessories = models.ManyToManyField(Accessory, blank=True, related_name="rentals")
+
+    # ── Rental configuration ─────────────────────────────────────
+    rental_type = models.CharField(
+        "rental type",
+        max_length=10,
+        choices=RentalType.choices,
+        default=RentalType.DAILY,
     )
     status = models.CharField(
         max_length=20,
@@ -313,27 +349,38 @@ class Rental(BaseModel):
         default=RentalStatus.PENDING,
     )
 
-    # ── Optional add-ons ─────────────────────────────────────────
-    games = models.ManyToManyField(Game, blank=True, related_name="rentals")
-    accessories = models.ManyToManyField(Accessory, blank=True, related_name="rentals")
-
     # ── Dates ────────────────────────────────────────────────────
-    start_date = models.DateField()
-    end_date = models.DateField()
-    actual_return_date = models.DateField(blank=True, null=True)
+    rental_start_date = models.DateField("start date")
+    rental_end_date = models.DateField("end date")
+    actual_return_date = models.DateField("actual return date", blank=True, null=True)
 
     # ── Pricing (snapshot at booking time) ───────────────────────
-    daily_rate = models.DecimalField(max_digits=8, decimal_places=2)
-    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    security_deposit = models.DecimalField(max_digits=8, decimal_places=2)
-    discount_amount = models.DecimalField(max_digits=8, decimal_places=2, default=0)
+    daily_rate = models.DecimalField("daily rate (₹)", max_digits=8, decimal_places=2, default=0)
+    total_price = models.DecimalField("total price (₹)", max_digits=10, decimal_places=2, default=0)
+    deposit_amount = models.DecimalField("deposit amount (₹)", max_digits=8, decimal_places=2, default=0)
+    discount_amount = models.DecimalField("discount (₹)", max_digits=8, decimal_places=2, default=0)
+    late_fee = models.DecimalField("late fee (₹)", max_digits=8, decimal_places=2, default=0)
 
     # ── Delivery ─────────────────────────────────────────────────
-    delivery_address = models.TextField(blank=True)
-    delivery_notes = models.TextField(blank=True)
+    delivery_option = models.CharField(
+        "delivery option",
+        max_length=20,
+        choices=DeliveryOption.choices,
+        default=DeliveryOption.PICKUP,
+    )
+    delivery_address = models.TextField("delivery address", blank=True)
+    delivery_notes = models.TextField("delivery notes", blank=True)
+
+    # ── Payment ──────────────────────────────────────────────────
+    payment_status = models.CharField(
+        "payment status",
+        max_length=20,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.UNPAID,
+    )
 
     # ── Tracking ─────────────────────────────────────────────────
-    rental_number = models.CharField(max_length=20, unique=True)
+    rental_number = models.CharField("rental number", max_length=20, unique=True)
 
     class Meta(BaseModel.Meta):
         verbose_name = "rental"
@@ -343,23 +390,48 @@ class Rental(BaseModel):
             models.Index(fields=["status"], name="idx_rental_status"),
             models.Index(fields=["rental_number"], name="idx_rental_number"),
             models.Index(fields=["user", "status"], name="idx_rental_user_status"),
-            models.Index(fields=["start_date", "end_date"], name="idx_rental_dates"),
+            models.Index(fields=["rental_start_date", "rental_end_date"], name="idx_rental_dates"),
+            models.Index(fields=["rental_type"], name="idx_rental_type"),
+            models.Index(fields=["payment_status"], name="idx_rental_payment"),
         ]
 
     def __str__(self):
         return f"Rental #{self.rental_number} – {self.user.email}"
 
+    def clean(self):
+        if self.rental_start_date and self.rental_end_date:
+            if self.rental_end_date <= self.rental_start_date:
+                raise ValidationError(
+                    {"rental_end_date": "End date must be after start date."}
+                )
+        if self.delivery_option == DeliveryOption.HOME_DELIVERY and not self.delivery_address:
+            raise ValidationError(
+                {"delivery_address": "Delivery address is required for home delivery."}
+            )
+
     @property
     def duration_days(self):
-        return (self.end_date - self.start_date).days
+        if self.rental_start_date and self.rental_end_date:
+            return (self.rental_end_date - self.rental_start_date).days
+        return 0
 
     @property
     def is_overdue(self):
         from django.utils import timezone
+
         return (
-            self.status == RentalStatus.ACTIVE
-            and self.end_date < timezone.now().date()
+            self.status in (RentalStatus.ACTIVE, RentalStatus.LATE)
+            and self.rental_end_date < timezone.now().date()
         )
+
+    @property
+    def overdue_days(self):
+        """Number of days past the expected return date."""
+        from django.utils import timezone
+
+        if not self.is_overdue:
+            return 0
+        return (timezone.now().date() - self.rental_end_date).days
 
 
 # ═══════════════════════════════════════════════════════════════════

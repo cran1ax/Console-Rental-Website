@@ -36,10 +36,10 @@ class CreatePaymentIntentView(APIView):
         # Determine amount
         payment_type = serializer.validated_data["payment_type"]
         if payment_type == "deposit":
-            amount = rental.security_deposit
+            amount = rental.deposit_amount
             p_type = PaymentType.DEPOSIT
         else:
-            amount = rental.total_amount
+            amount = rental.total_price
             p_type = PaymentType.RENTAL
 
         # Get or create Stripe customer

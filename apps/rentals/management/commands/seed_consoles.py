@@ -216,7 +216,7 @@ class Command(BaseCommand):
             {
                 "name": "DualSense Wireless Controller (Extra)",
                 "category": AccessoryCategory.CONTROLLER,
-                "compatible_with": ConsoleType.PS5,
+                "compatible_with": Platform.PS5,
                 "description": "Extra DualSense controller with haptic feedback.",
                 "price_per_day": Decimal("29.00"),
                 "stock_quantity": 15,
@@ -225,7 +225,7 @@ class Command(BaseCommand):
             {
                 "name": "DualShock 4 Controller (Extra)",
                 "category": AccessoryCategory.CONTROLLER,
-                "compatible_with": ConsoleType.PS4,
+                "compatible_with": Platform.PS4,
                 "description": "Extra DualShock 4 wireless controller.",
                 "price_per_day": Decimal("19.00"),
                 "stock_quantity": 12,
@@ -234,7 +234,7 @@ class Command(BaseCommand):
             {
                 "name": "PlayStation VR2",
                 "category": AccessoryCategory.VR_HEADSET,
-                "compatible_with": ConsoleType.PS5,
+                "compatible_with": Platform.PS5,
                 "description": "Next-gen VR headset with OLED displays.",
                 "price_per_day": Decimal("99.00"),
                 "stock_quantity": 4,
@@ -243,7 +243,7 @@ class Command(BaseCommand):
             {
                 "name": "Pulse 3D Wireless Headset",
                 "category": AccessoryCategory.HEADSET,
-                "compatible_with": ConsoleType.PS5,
+                "compatible_with": Platform.PS5,
                 "description": "3D Audio-enabled wireless headset for PS5.",
                 "price_per_day": Decimal("19.00"),
                 "stock_quantity": 10,
@@ -252,7 +252,7 @@ class Command(BaseCommand):
             {
                 "name": "HD Camera",
                 "category": AccessoryCategory.CAMERA,
-                "compatible_with": ConsoleType.PS5,
+                "compatible_with": Platform.PS5,
                 "description": "1080p HD camera for streaming and video chat.",
                 "price_per_day": Decimal("9.00"),
                 "stock_quantity": 6,
@@ -261,7 +261,7 @@ class Command(BaseCommand):
             {
                 "name": "DualSense Charging Station",
                 "category": AccessoryCategory.CHARGING_DOCK,
-                "compatible_with": ConsoleType.PS5,
+                "compatible_with": Platform.PS5,
                 "description": "Charge two DualSense controllers simultaneously.",
                 "price_per_day": Decimal("9.00"),
                 "stock_quantity": 8,
@@ -270,7 +270,7 @@ class Command(BaseCommand):
             {
                 "name": "HDMI 2.1 Cable (3m)",
                 "category": AccessoryCategory.CABLE,
-                "compatible_with": ConsoleType.PS5,
+                "compatible_with": Platform.CROSS_GEN,
                 "description": "Ultra High Speed HDMI cable for 4K 120Hz.",
                 "price_per_day": Decimal("5.00"),
                 "stock_quantity": 20,
