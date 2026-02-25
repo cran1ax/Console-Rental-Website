@@ -393,6 +393,15 @@ class Rental(BaseModel):
             models.Index(fields=["rental_start_date", "rental_end_date"], name="idx_rental_dates"),
             models.Index(fields=["rental_type"], name="idx_rental_type"),
             models.Index(fields=["payment_status"], name="idx_rental_payment"),
+            # ── Availability overlap queries ────────────────────
+            models.Index(
+                fields=["console", "status", "rental_start_date", "rental_end_date"],
+                name="idx_rental_console_overlap",
+            ),
+            models.Index(
+                fields=["status", "rental_start_date", "rental_end_date"],
+                name="idx_rental_status_dates",
+            ),
         ]
 
     def __str__(self):

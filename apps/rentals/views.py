@@ -7,10 +7,13 @@ from rest_framework.response import Response
 
 from apps.core.permissions import IsAdminOrReadOnly, IsOwner
 
-from . import rental_service
+from . import availability_service, rental_service
 from .models import Accessory, Console, Game, Rental, RentalStatus, Review
 from .serializers import (
     AccessorySerializer,
+    AvailabilityCheckSerializer,
+    AvailabilityItemSerializer,
+    BulkAvailabilitySerializer,
     ConsoleDetailSerializer,
     ConsoleListSerializer,
     GameDetailSerializer,
@@ -51,6 +54,30 @@ class ConsoleViewSet(viewsets.ReadOnlyModelViewSet):
         reviews = Review.objects.filter(console=console).select_related("user")
         serializer = ReviewSerializer(reviews, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"], url_path="check-availability")
+    def check_availability(self, request, slug=None):
+        """
+        Check if this console is available for a date range.
+
+        Query params: ``?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD``
+
+        Returns an availability verdict with stock / overlap details.
+        """
+        console = self.get_object()
+        serializer = AvailabilityCheckSerializer(data={
+            "console_id": console.pk,
+            "start_date": request.query_params.get("start_date"),
+            "end_date": request.query_params.get("end_date"),
+        })
+        serializer.is_valid(raise_exception=True)
+
+        result = availability_service.check_console_availability(
+            console=console,
+            start=serializer.validated_data["start_date"],
+            end=serializer.validated_data["end_date"],
+        )
+        return Response(AvailabilityItemSerializer(result).data)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -207,3 +234,46 @@ class ReviewCreateView(generics.CreateAPIView):
             user=self.request.user,
             console=rental.console,
         )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# AVAILABILITY
+# ═══════════════════════════════════════════════════════════════════
+
+class AvailabilityCheckView(generics.GenericAPIView):
+    """
+    POST /api/rentals/availability/check/
+
+    Bulk availability check for an entire cart (console + games +
+    accessories) against a date range.  Returns per-item verdicts
+    and a top-level ``all_available`` flag.
+
+    Request body::
+
+        {
+            "console_id": "<uuid>",          // optional
+            "game_ids": ["<uuid>", ...],     // optional
+            "accessory_ids": ["<uuid>", ...],// optional
+            "start_date": "2026-03-01",
+            "end_date": "2026-03-08"
+        }
+    """
+
+    serializer_class = AvailabilityCheckSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+
+        result = availability_service.check_bulk_availability(
+            console=data.get("console_id"),
+            games=data.get("game_ids", []),
+            accessories=data.get("accessory_ids", []),
+            start=data["start_date"],
+            end=data["end_date"],
+        )
+
+        return Response(BulkAvailabilitySerializer(result).data)

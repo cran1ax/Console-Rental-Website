@@ -239,22 +239,27 @@ class RentalCreateSerializer(serializers.Serializer):
                 "At least a console, game, or accessory is required."
             )
 
-        if console and console.available_quantity < 1:
-            raise serializers.ValidationError(
-                {"console": f'Console "{console.name}" is out of stock.'}
-            )
+        # ── Date-aware availability check (prevents double-bookings) ──
+        from . import availability_service
 
-        for game in games:
-            if game.available_quantity < 1:
-                raise serializers.ValidationError(
-                    {"game_ids": f'Game "{game.title}" is out of stock.'}
-                )
-
-        for acc in accessories:
-            if acc.available_quantity < 1:
-                raise serializers.ValidationError(
-                    {"accessory_ids": f'Accessory "{acc.name}" is out of stock.'}
-                )
+        result = availability_service.check_bulk_availability(
+            console=console,
+            games=games,
+            accessories=accessories,
+            start=data["rental_start_date"],
+            end=data["rental_end_date"],
+        )
+        if not result.all_available:
+            errors = {}
+            if result.console and not result.console.is_available:
+                errors["console"] = result.console.reason
+            unavail_games = [g for g in result.games if not g.is_available]
+            if unavail_games:
+                errors["game_ids"] = [g.reason for g in unavail_games]
+            unavail_accs = [a for a in result.accessories if not a.is_available]
+            if unavail_accs:
+                errors["accessory_ids"] = [a.reason for a in unavail_accs]
+            raise serializers.ValidationError(errors or "Selected items are not available.")
 
         if (
             data.get("delivery_option") == DeliveryOption.HOME_DELIVERY
@@ -376,3 +381,66 @@ class ReviewSerializer(serializers.ModelSerializer):
         if hasattr(value, "review"):
             raise serializers.ValidationError("You have already reviewed this rental.")
         return value
+
+
+# ═══════════════════════════════════════════════════════════════════
+# AVAILABILITY
+# ═══════════════════════════════════════════════════════════════════
+
+class AvailabilityCheckSerializer(serializers.Serializer):
+    """
+    Input serializer for the availability check endpoint.
+
+    At minimum the caller must provide a date range.  Item IDs are optional —
+    if only dates are given the response just confirms the dates are valid.
+    """
+
+    console_id = serializers.PrimaryKeyRelatedField(
+        queryset=Console.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+        help_text="Console to check.",
+    )
+    game_ids = serializers.PrimaryKeyRelatedField(
+        queryset=Game.objects.filter(is_active=True),
+        many=True,
+        required=False,
+        help_text="Games to check.",
+    )
+    accessory_ids = serializers.PrimaryKeyRelatedField(
+        queryset=Accessory.objects.filter(is_active=True),
+        many=True,
+        required=False,
+        help_text="Accessories to check.",
+    )
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+
+    def validate(self, data):
+        if data["start_date"] >= data["end_date"]:
+            raise serializers.ValidationError(
+                {"end_date": "End date must be after start date."}
+            )
+        return data
+
+
+class AvailabilityItemSerializer(serializers.Serializer):
+    """Read-only serializer for a single AvailabilityResult dataclass."""
+
+    item_id = serializers.UUIDField()
+    item_type = serializers.CharField()
+    item_name = serializers.CharField()
+    is_available = serializers.BooleanField()
+    stock_quantity = serializers.IntegerField()
+    overlapping_rentals = serializers.IntegerField()
+    available_for_dates = serializers.IntegerField()
+    reason = serializers.CharField()
+
+
+class BulkAvailabilitySerializer(serializers.Serializer):
+    """Read-only serializer for BulkAvailabilityResult."""
+
+    all_available = serializers.BooleanField()
+    console = AvailabilityItemSerializer(allow_null=True)
+    games = AvailabilityItemSerializer(many=True)
+    accessories = AvailabilityItemSerializer(many=True)

@@ -243,23 +243,30 @@ def create_rental(
     """
     Create a new rental, auto-calculate pricing, decrement stock.
 
+    Uses date-aware availability checking via ``availability_service`` to
+    prevent double-bookings for future date ranges.
+
     Raises ``ValueError`` if nothing is being rented or stock is insufficient.
     """
+    from . import availability_service
+
     # ── Guard: must rent something ───────────────────────────────
     if not console and not games and not accessories:
         raise ValueError("At least a console, game, or accessory is required.")
 
-    # ── Guard: stock availability ────────────────────────────────
-    if console and console.available_quantity < 1:
-        raise ValueError(f'Console "{console.name}" is out of stock.')
-
-    for game in games:
-        if game.available_quantity < 1:
-            raise ValueError(f'Game "{game.title}" is out of stock.')
-
-    for acc in accessories:
-        if acc.available_quantity < 1:
-            raise ValueError(f'Accessory "{acc.name}" is out of stock.')
+    # ── Guard: date-aware stock availability ─────────────────────
+    result = availability_service.check_bulk_availability(
+        console=console,
+        games=games,
+        accessories=accessories,
+        start=rental_start_date,
+        end=rental_end_date,
+    )
+    if not result.all_available:
+        unavailable_names = [item.item_name for item in result.unavailable_items]
+        raise ValueError(
+            f"Not available for selected dates: {', '.join(unavailable_names)}"
+        )
 
     # ── Price calculation ────────────────────────────────────────
     pricing = calculate_rental_price(
