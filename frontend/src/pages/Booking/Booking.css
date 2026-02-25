@@ -1,0 +1,60 @@
+.booking {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 2rem 0;
+}
+
+.booking h1 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  margin-bottom: 1.5rem;
+}
+
+.booking__console-badge {
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.booking__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* ── Price Summary ───────────────────────────────────────────── */
+.booking__summary {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+
+.booking__summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  font-size: 1rem;
+}
+
+.booking__summary-row strong {
+  font-size: 1.2rem;
+  color: var(--color-primary);
+}
+
+.booking__summary-row--muted {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+}
+
+.booking__submit {
+  width: 100%;
+  justify-content: center;
+  margin-top: 0.5rem;
+}

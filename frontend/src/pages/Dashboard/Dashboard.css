@@ -1,0 +1,135 @@
+.dashboard {
+  padding: 2rem 0;
+}
+
+.dashboard__header {
+  margin-bottom: 2rem;
+}
+
+.dashboard__header h1 {
+  font-size: 1.75rem;
+  font-weight: 800;
+}
+
+.dashboard__email {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+/* ── Tabs ────────────────────────────────────────────────────── */
+.dashboard__tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 2rem;
+}
+
+.dashboard__tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.75rem 1.25rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dashboard__tab:hover {
+  color: var(--color-text);
+}
+
+.dashboard__tab--active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+/* ── Section ─────────────────────────────────────────────────── */
+.dashboard__section {
+  min-height: 200px;
+}
+
+.dashboard__empty {
+  text-align: center;
+  padding: 3rem;
+  color: var(--color-text-muted);
+}
+
+.dashboard__empty .btn {
+  margin-top: 1rem;
+}
+
+/* ── Rental Cards ────────────────────────────────────────────── */
+.rental-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.rental-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1.25rem;
+}
+
+.rental-card__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.rental-card__number {
+  font-weight: 700;
+  font-size: 0.95rem;
+  font-family: monospace;
+}
+
+.rental-card__console {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.rental-card__dates {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.rental-card__bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.rental-card__price {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.rental-card__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ── Profile Form ────────────────────────────────────────────── */
+.profile-form {
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ── Review Console Name ─────────────────────────────────────── */
+.review-card__console-name {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-top: 0.5rem;
+  font-style: italic;
+}
